@@ -22,8 +22,9 @@ class GPTIntermediateBlock(nn.Module):
             num_layers=num_layers)
         self._autoregressive_mask = None
 
-    def get_mask_for(self, sequence_length: int):
-        if self._autoregressive_mask is None or self._autoregressive_mask.shape[0] != sequence_length:
+    def get_mask_for(self, sequence_length: int, device: torch.device):
+        if self._autoregressive_mask is None or self._autoregressive_mask.shape[0] != sequence_length\
+                or self._autoregressive_mask.device != device:
             mask = (torch.triu(torch.ones(sequence_length, sequence_length)) == 1).transpose(0, 1)
             mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
             self._autoregressive_mask = mask
@@ -31,7 +32,7 @@ class GPTIntermediateBlock(nn.Module):
 
     def forward(self, activations):
         # activations shape: batch_size x seq_length x hid_size
-        mask = self.get_mask_for(sequence_length=activations.shape[1])
+        mask = self.get_mask_for(sequence_length=activations.shape[1], device=activations.device)
         activations_transposed = activations.transpose(0, 1)  # seq_length x batch_size x hid_size
         outputs_transposed = self.transformer(activations_transposed, mask)
         return outputs_transposed.transpose(0, 1)
@@ -47,7 +48,8 @@ class GPTInitialBlock(GPTIntermediateBlock):
         # tokens shape = [batch_size x seq_length]
         tokens_transposed = tokens.transpose(0, 1)  # [seq_length x batch_size]
         embeddings_transposed = self.positional_encoding(self.embedding(tokens_transposed))
-        outputs_transposed = self.transformer(embeddings_transposed, self.get_mask_for(tokens.shape[1]))
+        mask = self.get_mask_for(tokens.shape[1], embeddings_transposed.device)
+        outputs_transposed = self.transformer(embeddings_transposed, mask)
         return outputs_transposed.transpose(0, 1)
 
 
