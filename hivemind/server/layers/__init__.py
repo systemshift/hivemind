@@ -14,7 +14,7 @@ name_to_block = {'ffn': lambda hid_dim: FeedforwardBlock(hid_dim),
                  'gpt_intermediate_128tokens_voc32k': lambda hid_dim: GPTIntermediateBlock(
                      d_model=hid_dim, nhead=hid_dim // 128, num_layers=1),
                  'gpt_final_128tokens_voc32k': lambda hid_dim: GPTFinalBlock(
-                     d_model=hid_dim, nhead=hid_dim // 128, num_layers=1, vocab_size=32_000),
+                     d_model=hid_dim, nhead=hid_dim // 128, num_layers=0, vocab_size=32_000),
                  }
 
 name_to_input = {'ffn': lambda batch_size, hid_dim: torch.empty((batch_size, hid_dim)),

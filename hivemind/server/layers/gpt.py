@@ -11,6 +11,7 @@ class GPTIntermediateBlock(nn.Module):
 
     TODO: enforce dropout layer consistency (see dropout.py) for actual training, same as in torch.utils.checkpoint
     TODO: use post-normalization in transformer
+    TODO: for logits layer: move logits to a separate block to avoid bottlenecking the entire pipeline
     """
 
     def __init__(self, d_model, nhead, num_layers):
