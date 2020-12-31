@@ -11,7 +11,7 @@ name_to_block = {'ffn': lambda hid_dim: FeedforwardBlock(hid_dim),
 
                  'gpt_initial_128tokens': lambda hid_dim: GPTInitialBlock(
                      d_model=hid_dim, nhead=hid_dim // 128, num_layers=1, vocab_size=64_000),
-                 'gpt_intermediate_128tokens_': lambda hid_dim: GPTIntermediateBlock(
+                 'gpt_intermediate_128tokens': lambda hid_dim: GPTIntermediateBlock(
                      d_model=hid_dim, nhead=hid_dim // 128, num_layers=1),
                  'gpt_final_128tokens': lambda hid_dim: GPTFinalBlock(
                      d_model=hid_dim, nhead=hid_dim // 128, num_layers=0, vocab_size=64_000),
