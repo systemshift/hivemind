@@ -27,7 +27,8 @@ class GPTIntermediateBlock(nn.Module):
                 or self._autoregressive_mask.device != device:
             mask = (torch.triu(torch.ones(sequence_length, sequence_length)) == 1).transpose(0, 1)
             mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-            self._autoregressive_mask = mask
+            self._autoregressive_mask = mask.to(device)
+            print('!Generated mask')
         return self._autoregressive_mask
 
     def forward(self, activations):
