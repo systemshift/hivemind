@@ -136,6 +136,8 @@ class Server(threading.Thread):
             expert = name_to_block[expert_cls](hidden_dim)
             experts[expert_uid] = hivemind.ExpertBackend(name=expert_uid, expert=expert,
                                                          args_schema=args_schema,
+                                                         outputs_schema=hivemind.BatchTensorDescriptor(
+                                                             hidden_dim, compression=compression),
                                                          opt=optim_cls(expert.parameters()),
                                                          max_batch_size=max_batch_size,
                                                          )
