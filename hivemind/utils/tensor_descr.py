@@ -32,7 +32,7 @@ class TensorDescriptor(DescriptorBase):
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor):
-        return cls(tensor.shape, tensor.dtype, tensor.layout, tensor.device, tensor.requires_grad, tensor.is_pinned())
+        return cls(tensor.shape, tensor.dtype, tensor.layout, tensor.device, tensor.requires_grad, False)
 
     def make_empty(self, **kwargs):
         properties = asdict(self)
