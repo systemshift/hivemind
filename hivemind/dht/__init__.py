@@ -196,7 +196,9 @@ class DHT(mp.Process):
         return future if return_future else future.result()
 
     async def _get(self, node: DHTNode, key: DHTKey, latest: bool, future: MPFuture, **kwargs):
-        future.set_result(await node.get(key, latest=latest, **kwargs))
+        result = await node.get(key, latest=latest, **kwargs)
+        if not future.done():
+            future.set_result(result)
 
     def store(self, key: DHTKey, value: DHTValue, expiration_time: DHTExpiration,
                     subkey: Optional[Subkey] = None, return_future: bool = False, **kwargs) -> bool:
@@ -213,7 +215,9 @@ class DHT(mp.Process):
 
     async def _store(self, node: DHTNode, key: DHTKey, value: DHTValue, expiration_time: DHTExpiration,
                      subkey: Optional[Subkey], future: MPFuture, **kwargs):
-        future.set_result(await node.store(key, value, expiration_time, subkey=subkey, **kwargs))
+        result = await node.store(key, value, expiration_time, subkey=subkey, **kwargs)
+        if not future.done():
+            future.set_result(result)
 
     def get_visible_address(self, num_peers: Optional[int] = None, peers: Sequence[Endpoint] = ()) -> Hostname:
         """
