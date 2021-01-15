@@ -23,7 +23,6 @@ from hivemind.utils.asyncio import anext, achain, aiter, switch_to_uvloop
 # flavour types
 StreamCallToLeader = grpc.aio.UnaryStreamCall[averaging_pb2.JoinRequest, averaging_pb2.MessageFromLeader]
 
-INITIAL_GROUP_NBITS = 3
 logger = get_logger(__name__)
 
 
@@ -67,7 +66,7 @@ class DecentralizedAverager(mp.Process, averaging_pb2_grpc.DecentralizedAveragin
     _pending_group_assembled: asyncio.Event
 
     def __init__(self, averaged_tensors: Sequence[torch.Tensor], dht: hivemind.dht.DHT, *, start: bool,
-                 prefix: str, target_group_size: int, min_group_size: int = 2, initial_group_bits: Optional[str] = None,
+                 prefix: str, target_group_size: int, min_group_size: int = 2, initial_group_bits: str = '',
                  averaging_expiration: float = 15, request_timeout: float = 3, chunk_size_bytes: int = 2 ** 16,
                  allreduce_timeout: Optional[float] = None, averaging_alpha: float = 1.0,
                  compression_type: runtime_pb2.CompressionType = runtime_pb2.CompressionType.NONE,
@@ -76,10 +75,7 @@ class DecentralizedAverager(mp.Process, averaging_pb2_grpc.DecentralizedAveragin
         assert '.' not in prefix, "group prefix must be a string without trailing '.'"
         if not is_power_of_two(target_group_size):
             logger.warning("It is recommended to set target_group_size to a power of 2.")
-        if initial_group_bits is None:
-            initial_group_bits = ''.join(random.choices('01', k=INITIAL_GROUP_NBITS))
-            logger.debug(f"Initializing with random {INITIAL_GROUP_NBITS}-bit group index: {initial_group_bits}")
-        assert len(initial_group_bits) >= INITIAL_GROUP_NBITS and all(bit in '01' for bit in initial_group_bits)
+        assert all(bit in '01' for bit in initial_group_bits)
 
         super().__init__()
         self.dht = dht
