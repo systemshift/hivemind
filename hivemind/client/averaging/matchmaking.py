@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import random
-from dataclasses import asdict
+from dataclasses import dataclass, asdict
 from math import isfinite
-from typing import Sequence, Optional, AsyncIterator, Set, Tuple, Dict
+from typing import Sequence, Optional, AsyncIterator, Set, Tuple, Dict, Callable, Awaitable, Any
 import asyncio
 
 import grpc
 import torch
 
-from hivemind.client.averaging.allreduce import AllReduceRunner
+from hivemind.client.averaging.allreduce import AllReduceRunner, GroupID
 from hivemind.client.averaging.load_balancing import load_balance_peers
 from hivemind.client.averaging.key_manager import GroupKeyManager, GroupKey
 from hivemind.dht import DHT, DHTID, DHTExpiration, get_dht_time
@@ -22,6 +22,15 @@ from hivemind.utils.grpc import ChannelCache
 
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class GroupInfo:
+    group_id: GroupID
+    endpoint: Endpoint
+    ordered_group_endpoints: Tuple[Endpoint, ...]
+    group_key_seed: int
+    gathered: Sequence[Any] = (),
 
 
 class Matchmaking(averaging_pb2_grpc.DecentralizedAveragingServicer):
@@ -40,6 +49,7 @@ class Matchmaking(averaging_pb2_grpc.DecentralizedAveragingServicer):
     def __init__(self, endpoint: Endpoint, averaged_tensors: Sequence[torch.Tensor], dht: DHT, *,
                  prefix: str, target_group_size: int, min_group_size: int, initial_group_bits: Optional[str] = None,
                  averaging_expiration: float = 15, request_timeout: float, throughput: Optional[float] = None,
+                 callback_on_found_group: Optional[Callable[GroupInfo, Awaitable[Any]]] = None,
                  min_vector_size: int, **allreduce_kwargs):
         assert '.' not in prefix, "group prefix must be a string without ."
         if request_timeout is None or request_timeout >= averaging_expiration:
@@ -64,6 +74,7 @@ class Matchmaking(averaging_pb2_grpc.DecentralizedAveragingServicer):
         self.current_leader: Optional[Endpoint] = None  # iff i am a follower, this is a link to my current leader
         self.current_followers: Dict[Endpoint, averaging_pb2.JoinRequest] = {}  # my current followers excluding myself
         self.potential_leaders = PotentialLeaders(endpoint, averaging_expiration, target_group_size)
+        self.callback_on_found_group = callback_on_found_group
         self.data_for_gather: Optional[bytes] = None
 
     @property
@@ -81,7 +92,7 @@ class Matchmaking(averaging_pb2_grpc.DecentralizedAveragingServicer):
         return f"{self.__class__.__name__}(endpoint={self.endpoint}, schema={schema_hash_repr}, {lfg_status}" \
                f" current key = {self.group_key_manager.current_key})"
 
-    async def look_for_group(self, *, data_for_gather: bytes = b'', timeout: Optional[float] = None
+    async def look_for_group(self, *, data_for_gather: bytes = b'', timeout: Optional[float] = None,
                              ) -> Optional[AllReduceRunner]:
         """
         :param data_for_gather: optionally send this data to all peers in the next group and gather it from groupmates
@@ -299,6 +310,7 @@ class Matchmaking(averaging_pb2_grpc.DecentralizedAveragingServicer):
         ordered_group_endpoints = list(self.current_followers)
         ordered_group_endpoints.append(self.endpoint)
         random.shuffle(ordered_group_endpoints)
+        ordered_group_endpoints = tuple(ordered_group_endpoints)
 
         throughputs, gathered = [], []
         for endpoint in ordered_group_endpoints:
@@ -314,9 +326,12 @@ class Matchmaking(averaging_pb2_grpc.DecentralizedAveragingServicer):
         group_key_seed = random.randint(- 2 ** 31, 2 ** 31 - 1)
 
         logger.debug(f"{self.endpoint} - leader started allreduce for {len(ordered_group_endpoints)} peers.")
-        allreduce_group = AllReduceRunner(group_id=group_id, tensors=self.averaged_tensors, endpoint=self.endpoint,
-                                          ordered_group_endpoints=ordered_group_endpoints, part_sizes=part_sizes,
-                                          gathered=gathered, group_key_seed=group_key_seed, **self.allreduce_kwargs)
+        group_info = GroupInfo(group_id, self.endpoint, ordered_group_endpoints, group_key_seed, gathered)
+        if self.callback_on_found_group:
+            await self.callback_on_found_group(group_info)
+
+        allreduce_group = AllReduceRunner(tensors=self.averaged_tensors, part_sizes=part_sizes,
+                                          **asdict(group_info), **self.allreduce_kwargs)
         await self.group_key_manager.update_key_on_group_assembled(allreduce_group, is_leader=True)
         self.assembled_group.set_result(allreduce_group)
         return allreduce_group

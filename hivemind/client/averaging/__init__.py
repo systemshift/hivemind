@@ -7,7 +7,7 @@ import contextlib
 import ctypes
 import multiprocessing as mp
 from concurrent.futures.thread import ThreadPoolExecutor
-from typing import Sequence, Optional, Tuple, Any, Union, Dict, AsyncIterator
+from typing import Sequence, Optional, Tuple, Any, Union, Dict, AsyncIterator, Callable
 
 import grpc
 import torch
@@ -15,7 +15,7 @@ import numpy as np
 
 import hivemind
 from hivemind.client.averaging.allreduce import AllReduceRunner, AllreduceException, GroupID
-from hivemind.client.averaging.matchmaking import Matchmaking, MatchmakingException
+from hivemind.client.averaging.matchmaking import Matchmaking, MatchmakingException, GroupInfo
 from hivemind.proto import averaging_pb2, averaging_pb2_grpc, runtime_pb2
 from hivemind.utils import get_logger, Endpoint, Port, MPFuture, GRPC_KEEPALIVE_OPTIONS, get_dht_time, MSGPackSerializer
 from hivemind.utils.asyncio import anext, achain, aiter, switch_to_uvloop
@@ -152,7 +152,7 @@ class DecentralizedAverager(mp.Process, averaging_pb2_grpc.DecentralizedAveragin
             assert found_port != 0, f"Failed to listen to {self.listen_on}"
             self._port.value = found_port
             self._matchmaking = Matchmaking(self.endpoint, self._averaged_tensors, self.dht, **self.matchmaking_kwargs,
-                                            return_deltas=True)  # note: we need deltas to make allreduce lock-free
+                                            return_deltas=True, callback_on_found_group=self._trigger_callback)
             self._pending_group_assembled = asyncio.Event()
             self._pending_group_assembled.set()
             await server.start()
@@ -182,7 +182,8 @@ class DecentralizedAverager(mp.Process, averaging_pb2_grpc.DecentralizedAveragin
             logger.warning("DHT shutdown has no effect: the process is not alive")
 
     def step(self, gather: Optional[DataForGather] = None, allow_retries: bool = True, timeout: Optional[float] = None,
-             wait=True) -> Union[Optional[Dict[Endpoint, DataForGather]], MPFuture]:
+             callback_before_allreduce: Optional[Callable[[GroupInfo], Any]] = None, wait=True
+             ) -> Union[Optional[Dict[Endpoint, DataForGather]], MPFuture]:
         """
         Set up the averager to look for a group and run one round of averaging, return True on success, False on failure
 
@@ -192,9 +193,14 @@ class DecentralizedAverager(mp.Process, averaging_pb2_grpc.DecentralizedAveragin
           (this operation is known as all-gather). The gathered data will be available as the output of this function.
         :param timeout: if averager was unable to *find* a group in this many seconds, consider allreduce failedK
         :param wait: if True (default), return when finished. Otherwise return MPFuture and run in background.
+        :param callback_before_allreduce: if specified, execute this function after the group is found, but
+          BEFORE performing the actual allreduce steps (i.e. immediately before AllReduceRunner is created)
+        :note: callback_before_allreduce is executed in the host process and NOT inside the averager daemon.
+          You will have access to any external variables, but it will NOT have access to averager internals.
         :returns: on success, update averaged_tensors and return group info; on failure, return None
         """
         future, _future = MPFuture.make_pair()
+
         self.pipe.send(('_step', [], dict(future=_future, gather=gather, allow_retries=allow_retries, timeout=timeout)))
         return future.result() if wait else future
 
@@ -233,6 +239,18 @@ class DecentralizedAverager(mp.Process, averaging_pb2_grpc.DecentralizedAveragin
             finally:
                 _ = self._running_groups.pop(group_id, None)
                 self._pending_group_assembled.set()
+
+    async def _trigger_callback(self, group_info: GroupInfo):
+        future, _future = MPFuture.make_pair()
+        self._pipe.send((group_info, future))
+        return await _future
+
+    def _run_callback_on_assembled_group(self, callback: Optional[Callable[[GroupInfo], Any]]):
+        group_info, future = self.pipe.recv()
+        try:
+            callback(group_info)
+        finally:
+            future.set_result(None)
 
     def update_tensors(self, allreduce_group: AllReduceRunner):
         """
